@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>1942 스타일 슈팅 게임</title>
+    <style>
+        canvas { border: 1px solid black; }
+        body { display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #87CEEB; }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    <!-- 사운드 파일 -->
+    <audio id="shootSound" src="shoot.mp3"></audio>
+    <audio id="explosionSound" src="explosion.mp3"></audio>
+    <audio id="itemSound" src="item.mp3"></audio>
+    <audio id="bossSound" src="boss.mp3"></audio>
+    <audio id="bgm" src="bgm.mp3" loop></audio>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // 사운드 로드
+        const shootSound = document.getElementById('shootSound');
+        const explosionSound = document.getElementById('explosionSound');
+        const itemSound = document.getElementById('itemSound');
+        const bossSound = document.getElementById('bossSound');
+        const bgm = document.getElementById('bgm');
+        bgm.play(); // 배경 음악 시작
+
+        // 이미지 로드
+        const images = {};
+        const imageFiles = {
+            player: 'player.png',
+            enemy: 'enemy.png',
+            boss: 'boss.png',
+            bullet: 'bullet.png',
+            enemyBullet: 'enemyBullet.png',
+            item: 'item.png',
+            explosion: 'explosion.png'
+        };
+
+        let loadedImages = 0;
+        const totalImages = Object.keys(imageFiles).length;
+        for (let key in imageFiles) {
+            images[key] = new Image();
+            images[key].src = imageFiles[key];
+            images[key].onload = () => {
+                loadedImages++;
+                if (loadedImages === totalImages) gameLoop();
+            };
+        }
+
+        // 플레이어
+        const player = { x: 400, y: 500, size: 50, speed: 5, fireRate: 20, fireCooldown: 0, lives: 3 };
+        const bullets = [];
+        const enemies = [];
+        const enemyBullets = [];
+        const items = [];
+        const explosions = [];
+        let score = 0;
+        let stage = 1;
+        let bossActive = false;
+
+        // 키 입력
+        let keys = {};
+        window.addEventListener('keydown', (e) => {
+            keys[e.key] = true;
+            if (e.key === ' ' && player.fireCooldown <= 0 && player.lives > 0) {
+                bullets.push({ x: player.x + player.size / 2 - 2.5, y: player.y });
+                player.fireCooldown = player.fireRate;
+                shootSound.currentTime = 0;
+                shootSound.play();
+            }
+        });
+        window.addEventListener('keyup', (e) => keys[e.key] = false);
+
+        // 게임 루프
+        function gameLoop() {
+            if (loadedImages < totalImages) return;
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (player.lives <= 0) {
+                ctx.fillStyle = 'red';
+                ctx.font = '48px Arial';
+                ctx.fillText('Game Over', canvas.width / 2 - 100, canvas.height / 2);
+                bgm.pause();
+                return;
+            }
+
+            // 플레이어 이동
+            if (keys['ArrowLeft'] && player.x > 0) player.x -= player.speed;
+            if (keys['ArrowRight'] && player.x < canvas.width - player.size) player.x += player.speed;
+            if (keys['ArrowUp'] && player.y > 0) player.y -= player.speed;
+            if (keys['ArrowDown'] && player.y < canvas.height - player.size) player.y += player.speed;
+            player.fireCooldown--;
+
+            // 총알 이동
+            bullets.forEach((b, i) => {
+                b.y -= 7;
+                if (b.y < 0) bullets.splice(i, 1);
+            });
+
+            // 적 생성
+            if (!bossActive && Math.random() < 0.02) {
+                enemies.push({
+                    x: Math.random() * (canvas.width - 40),
+                    y: -40,
+                    size: 40,
+                    speed: 3,
+                    health: 1
+                });
+            }
+
+            // 보스 생성
+            if (!bossActive && score >= stage * 100) {
+                bossActive = true;
+                enemies.push({
+                    x: canvas.width / 2 - 50,
+                    y: -100,
+                    size: 100,
+                    speed: 1,
+                    health: 20 + stage * 10,
+                    isBoss: true,
+                    fireCooldown: 60
+                });
+                bossSound.currentTime = 0;
+                bossSound.play();
+            }
+
+            // 적 및 보스 로직
+            enemies.forEach((e, ei) => {
+                e.y += e.speed;
+                if (e.isBoss) {
+                    e.x += Math.sin(Date.now() / 500) * 2;
+                    if (e.fireCooldown-- <= 0) {
+                        enemyBullets.push({ x: e.x + e.size / 2 - 2.5, y: e.y + e.size });
+                        e.fireCooldown = 60 - stage * 5;
+                    }
+                }
+
+                bullets.forEach((b, bi) => {
+                    if (b.x < e.x + e.size && b.x + 5 > e.x && b.y < e.y + e.size && b.y + 10 > e.y) {
+                        e.health--;
+                        bullets.splice(bi, 1);
+                        if (e.health <= 0) {
+                            explosions.push({ x: e.x + e.size / 2, y: e.y + e.size / 2, radius: 0 });
+                            enemies.splice(ei, 1);
+                            score += e.isBoss ? 100 : 10;
+                            explosionSound.currentTime = 0;
+                            explosionSound.play();
+                            if (e.isBoss) bossActive = false, stage++;
+                            if (Math.random() < 0.3) items.push({ x: e.x, y: e.y, size: 20, type: 'fireRate' });
+                        }
+                    }
+                });
+
+                if (e.x < player.x + player.size && e.x + e.size > player.x &&
+                    e.y < player.y + player.size && e.y + e.size > player.y) {
+                    explosions.push({ x: player.x + player.size / 2, y: player.y + player.size / 2, radius: 0 });
+                    enemies.splice(ei, 1);
+                    player.lives--;
+                    explosionSound.currentTime = 0;
+                    explosionSound.play();
+                }
+
+                if (e.y > canvas.height) enemies.splice(ei, 1);
+            });
+
+            // 적 총알
+            enemyBullets.forEach((eb, ebi) => {
+                eb.y += 5;
+                if (eb.x < player.x + player.size && eb.x + 5 > player.x &&
+                    eb.y < player.y + player.size && eb.y + 10 > player.y) {
+                    explosions.push({ x: player.x + player.size / 2, y: player.y + player.size / 2, radius: 0 });
+                    enemyBullets.splice(ebi, 1);
+                    player.lives--;
+                    explosionSound.currentTime = 0;
+                    explosionSound.play();
+                }
+                if (eb.y > canvas.height) enemyBullets.splice(ebi, 1);
+            });
+
+            // 아이템
+            items.forEach((i, ii) => {
+                i.y += 2;
+                if (i.x < player.x + player.size && i.x + i.size > player.x &&
+                    i.y < player.y + player.size && i.y + i.size > player.y) {
+                    items.splice(ii, 1);
+                    if (i.type === 'fireRate') {
+                        player.fireRate = Math.max(5, player.fireRate - 5);
+                        itemSound.currentTime = 0;
+                        itemSound.play();
+                    }
+                }
+                if (i.y > canvas.height) items.splice(ii, 1);
+            });
+
+            // 폭발 효과
+            explosions.forEach((exp, ei) => {
+                exp.radius += 2;
+                if (exp.radius > 50) explosions.splice(ei, 1);
+            });
+
+            // 그리기
+            ctx.drawImage(images.player, player.x, player.y, player.size, player.size);
+            bullets.forEach(b => ctx.drawImage(images.bullet, b.x, b.y, 5, 10));
+            enemies.forEach(e => ctx.drawImage(e.isBoss ? images.boss : images.enemy, e.x, e.y, e.size, e.size));
+            enemyBullets.forEach(eb => ctx.drawImage(images.enemyBullet, eb.x, eb.y, 5, 10));
+            items.forEach(i => ctx.drawImage(images.item, i.x, i.y, i.size, i.size));
+            explosions.forEach(exp => {
+                const scale = exp.radius / 25;
+                ctx.drawImage(images.explosion, exp.x - exp.radius, exp.y - exp.radius, exp.radius * 2, exp.radius * 2);
+            });
+
+            // UI
+            ctx.fillStyle = 'black';
+            ctx.font = '24px Arial';
+            ctx.fillText(`Score: ${score} | Lives: ${player.lives} | Stage: ${stage}`, 10, 30);
+
+            requestAnimationFrame(gameLoop);
+        }
+    </script>
+</body>
+</html>
